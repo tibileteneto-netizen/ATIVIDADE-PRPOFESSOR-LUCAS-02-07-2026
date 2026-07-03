@@ -1,0 +1,138 @@
+-- ============================================
+-- TABELA DE JOGOS DE BASQUETE - SUPABASE
+-- ============================================
+
+-- 1. Criar a tabela principal
+CREATE TABLE jogos_basquete (
+    id BIGSERIAL PRIMARY KEY,
+    data_jogo DATE NOT NULL,
+    hora_jogo TIME DEFAULT '20:00:00',
+    time_mandante VARCHAR(100) NOT NULL,
+    time_visitante VARCHAR(100) NOT NULL,
+    pontos_mandante INT DEFAULT NULL,
+    pontos_visitante INT DEFAULT NULL,
+    arena VARCHAR(150),
+    cidade VARCHAR(100),
+    liga VARCHAR(50) DEFAULT 'NBA',
+    temporada VARCHAR(20) DEFAULT '2025-2026',
+    status VARCHAR(20) DEFAULT 'Agendado' CHECK (status IN ('Agendado', 'Em Andamento', 'Finalizado', 'Cancelado', 'Adiado')),
+    publico_presente INT DEFAULT NULL,
+    observacoes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Adicionar comentários para documentação
+COMMENT ON TABLE jogos_basquete IS 'Tabela de jogos de basquete';
+COMMENT ON COLUMN jogos_basquete.id IS 'Identificador único do jogo';
+COMMENT ON COLUMN jogos_basquete.data_jogo IS 'Data do jogo';
+COMMENT ON COLUMN jogos_basquete.status IS 'Status atual do jogo';
+
+-- 3. Criar índices para performance
+CREATE INDEX idx_jogos_data ON jogos_basquete(data_jogo);
+CREATE INDEX idx_jogos_status ON jogos_basquete(status);
+CREATE INDEX idx_jogos_liga ON jogos_basquete(liga);
+CREATE INDEX idx_jogos_mandante ON jogos_basquete(time_mandante);
+CREATE INDEX idx_jogos_visitante ON jogos_basquete(time_visitante);
+
+-- 4. Habilitar Row Level Security (RLS) - Segurança do Supabase
+ALTER TABLE jogos_basquete ENABLE ROW LEVEL SECURITY;
+
+-- 5. Políticas de acesso (ajuste conforme necessidade)
+-- Permitir leitura pública
+CREATE POLICY "Permitir leitura pública" 
+ON jogos_basquete 
+FOR SELECT 
+USING (true);
+
+-- Permitir inserção apenas para usuários autenticados
+CREATE POLICY "Permitir inserção para autenticados" 
+ON jogos_basquete 
+FOR INSERT 
+WITH CHECK (auth.role() = 'authenticated');
+
+-- Permitir atualização apenas para usuários autenticados
+CREATE POLICY "Permitir atualização para autenticados" 
+ON jogos_basquete 
+FOR UPDATE 
+USING (auth.role() = 'authenticated')
+WITH CHECK (auth.role() = 'authenticated');
+
+-- Permitir exclusão apenas para usuários autenticados
+CREATE POLICY "Permitir exclusão para autenticados" 
+ON jogos_basquete 
+FOR DELETE 
+USING (auth.role() = 'authenticated');
+
+-- 6. Trigger para atualizar updated_at automaticamente
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_jogos_basquete_updated_at
+    BEFORE UPDATE ON jogos_basquete
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- 7. Inserir dados de exemplo
+INSERT INTO jogos_basquete (data_jogo, hora_jogo, time_mandante, time_visitante, pontos_mandante, pontos_visitante, arena, cidade, liga, temporada, status, publico_presente) VALUES
+('2026-07-10', '21:00:00', 'Lakers', 'Celtics', 112, 108, 'Crypto.com Arena', 'Los Angeles', 'NBA', '2025-2026', 'Finalizado', 18997),
+('2026-07-12', '20:30:00', 'Warriors', 'Bulls', 125, 118, 'Chase Center', 'San Francisco', 'NBA', '2025-2026', 'Finalizado', 18064),
+('2026-07-15', '19:00:00', 'Heat', 'Nets', 98, 102, 'FTX Arena', 'Miami', 'NBA', '2025-2026', 'Finalizado', 19600),
+('2026-07-18', '20:00:00', 'Spurs', 'Mavericks', NULL, NULL, 'AT&T Center', 'San Antonio', 'NBA', '2025-2026', 'Agendado', NULL),
+('2026-07-20', '21:30:00', 'Knicks', '76ers', NULL, NULL, 'Madison Square Garden', 'New York', 'NBA', '2025-2026', 'Agendado', NULL),
+('2026-07-22', '20:00:00', 'Bucks', 'Cavaliers', 120, 113, 'Fiserv Forum', 'Milwaukee', 'NBA', '2025-2026', 'Finalizado', 17341),
+('2026-07-25', '22:00:00', 'Suns', 'Nuggets', NULL, NULL, 'Footprint Center', 'Phoenix', 'NBA', '2025-2026', 'Agendado', NULL),
+('2026-07-28', '21:00:00', 'Clippers', 'Kings', 118, 112, 'Crypto.com Arena', 'Los Angeles', 'NBA', '2025-2026', 'Finalizado', 19068);
+
+-- ============================================
+-- CONSULTAS ÚTEIS
+-- ============================================
+
+-- Consultar todos os jogos
+SELECT * FROM jogos_basquete ORDER BY data_jogo DESC;
+
+-- Próximos jogos agendados
+SELECT 
+    data_jogo,
+    hora_jogo,
+    time_mandante,
+    time_visitante,
+    arena,
+    cidade
+FROM jogos_basquete 
+WHERE status = 'Agendado'
+ORDER BY data_jogo ASC, hora_jogo ASC;
+
+-- Jogos finalizados com resultado
+SELECT 
+    data_jogo,
+    time_mandante || ' ' || pontos_mandante || ' x ' || pontos_visitante || ' ' || time_visitante as placar,
+    arena,
+    publico_presente
+FROM jogos_basquete 
+WHERE status = 'Finalizado'
+ORDER BY data_jogo DESC;
+
+-- Estatísticas por time mandante
+SELECT 
+    time_mandante,
+    COUNT(*) as total_jogos,
+    SUM(CASE WHEN pontos_mandante > pontos_visitante THEN 1 ELSE 0 END) as vitorias,
+    SUM(CASE WHEN pontos_mandante < pontos_visitante THEN 1 ELSE 0 END) as derrotas,
+    ROUND(AVG(pontos_mandante)::numeric, 2) as media_pontos_marcados,
+    ROUND(AVG(pontos_visitante)::numeric, 2) as media_pontos_sofridos
+FROM jogos_basquete 
+WHERE status = 'Finalizado'
+GROUP BY time_mandante
+ORDER BY vitorias DESC;
+
+-- Jogos do dia (útil para dashboard)
+SELECT * 
+FROM jogos_basquete 
+WHERE data_jogo = CURRENT_DATE
+ORDER BY hora_jogo;
